@@ -1,0 +1,5 @@
+{
+  "id": "paseo-bridge-grok",
+  "requirements": { "paseo": ">=0.16.0" },
+  "build": [["pnpm", "install", "--frozen-lockfile"], ["pnpm", "build"]]
+}

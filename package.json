@@ -1,0 +1,48 @@
+{
+  "name": "paseo-bridge-grok",
+  "version": "0.1.0",
+  "description": "Share terminal Grok Build sessions with unmodified Paseo through Grok's leader",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Konfekt/paseo-bridge-grok"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "packageManager": "pnpm@12.8.1",
+  "bin": {
+    "paseo-bridge-grok": "server/cli.js"
+  },
+  "files": [
+    "server",
+    "index.server.ts",
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "format": "biome check --write .",
+    "lint": "biome check --error-on-warnings .",
+    "typecheck": "pnpm build && tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json",
+    "package:smoke": "node scripts/package-smoke.mjs",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm package:smoke"
+  },
+  "dependencies": {
+    "@getpaseo/client": "0.16.2",
+    "@getpaseo/plugin": "0.16.2",
+    "@getpaseo/protocol": "0.16.2",
+    "@getpaseo/server": "0.16.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.2",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "^22.19.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
