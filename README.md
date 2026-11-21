@@ -94,10 +94,10 @@ Start `grok --leader` in a project and send a first prompt. Within a few seconds
 Discovery imports sessions active in the last 24 hours. Change the window with the environment variable `PASEO_BRIDGE_GROK_LOOKBACK_HOURS` on the Paseo daemon, or import older sessions once:
 
 ```sh
-node ~/.paseo/plugins/paseo-bridge-grok/server/cli.js once --hours 720
+node <plugin directory>/server/cli.js once --hours 720
 ```
 
-(use the plugin directory shown by `paseo plugin ls`; `--paseo-home PATH` selects another Paseo home).
+`<plugin directory>` is the `DIRECTORY` column of `paseo plugin ls`, for a GitHub install `$PASEO_HOME/plugins/paseo-bridge-grok/<id>/checkout`. `--paseo-home PATH` selects another Paseo home.
 
 ### Another Grok home or binary
 
