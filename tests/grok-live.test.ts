@@ -1,23 +1,7 @@
-import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { createHostClient } from "@getpaseo/client/node";
-import { createPaseoDaemon, createRootLogger } from "@getpaseo/server";
-import { expect, test, vi } from "vitest";
-import { AcpClient } from "./fixtures/acp-client.js";
-import { grokConfig, startModelServer } from "./fixtures/model-server.js";
-
-/** The real Grok Build executable: GROK_BIN, else `grok` on PATH. */
-function findGrok(): string | null {
-  const candidate = process.env["GROK_BIN"] ?? "grok";
-  try {
-    execFileSync(candidate, ["--version"], { stdio: "ignore", timeout: 15_000 });
-    return candidate;
-  } catch {
-    return null;
-  }
-}
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { expect, test } from "vitest";
+import { findGrok, startLive } from "./fixtures/live.js";
 
 const grok = findGrok();
 
@@ -26,87 +10,10 @@ test.skipIf(!grok)(
   { timeout: 180_000 },
   async () => {
     if (!grok) return;
-    const root = await mkdtemp(join(tmpdir(), "pbg-live-"));
-    const grokHome = join(root, "grok");
-    const paseoHome = join(root, "paseo");
-    const project = join(root, "project");
-    await Promise.all([mkdir(grokHome), mkdir(paseoHome), mkdir(project)]);
-    const model = await startModelServer({ slowMs: 2_500 });
-    await writeFile(join(grokHome, "config.toml"), grokConfig(model.url));
-    const grokEnv = {
-      ...process.env,
-      GROK_HOME: grokHome,
-      GROK_DISABLE_AUTOUPDATER: "1",
-      XAI_API_KEY: "",
-    };
-    const terminal = new AcpClient(grok, ["agent", "--leader", "stdio"], grokEnv, project);
-    const { dependencies } = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
-      dependencies: Record<string, string>;
-    };
-    const paseoVersion = dependencies["@getpaseo/server"];
-    if (!paseoVersion) throw new Error("Missing @getpaseo/server dependency");
-    const daemon = await createPaseoDaemon(
-      {
-        listen: "127.0.0.1:0",
-        paseoHome,
-        daemonVersion: paseoVersion,
-        corsAllowedOrigins: [],
-        hostnames: true,
-        mcpEnabled: false,
-        browserToolsEnabled: false,
-        staticDir: root,
-        mcpDebug: false,
-        agentClients: {},
-        agentStoragePath: join(paseoHome, "agents"),
-        relayEnabled: false,
-        pluginsEnabled: true,
-        providerOverrides: {
-          "grok-terminal": {
-            command: [grok],
-            env: { GROK_HOME: grokHome, GROK_DISABLE_AUTOUPDATER: "1", XAI_API_KEY: "" },
-          },
-        },
-      },
-      createRootLogger({ level: "error" }),
-    );
-    vi.stubEnv("PASEO_HOME", paseoHome);
-    let client: ReturnType<typeof createHostClient> | undefined;
+    const live = await startLive(grok, "hello from the terminal");
+    const { client, daemon, terminal, sessionId, grokHome, project } = live;
+    const connected = client;
     try {
-      // The terminal starts a session and saves its first message before Paseo looks.
-      await terminal.initialize();
-      const created = await terminal.call("session/new", { cwd: project, mcpServers: [] });
-      const sessionId = created["sessionId"] as string;
-      await terminal.call("session/prompt", {
-        sessionId,
-        prompt: [{ type: "text", text: "hello from the terminal" }],
-      });
-
-      await daemon.start();
-      const address = daemon.getListenTarget();
-      if (address?.type !== "tcp") throw new Error("No bound Paseo listener");
-      await writeFile(
-        join(paseoHome, "paseo.pid"),
-        JSON.stringify({
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-          hostname: hostname(),
-          uid: process.getuid?.() ?? 0,
-          listen: `127.0.0.1:${address.port}`,
-        }),
-      );
-      client = createHostClient(`127.0.0.1:${address.port}`, {
-        clientId: "grok-live",
-        clientType: "cli",
-        reconnect: { enabled: false },
-      });
-      await client.connect();
-      const connected = client;
-      const pluginDirectory = process.env["PASEO_BRIDGE_TEST_PLUGIN_DIR"] ?? resolve(".");
-      expect(await client.installDirectoryPlugin(pluginDirectory)).toMatchObject({
-        id: "paseo-bridge-grok",
-        status: "running",
-      });
-
       // Discovery imports the terminal session into its own workspace.
       await expect
         .poll(async () => (await connected.fetchAgents()).entries.length, { timeout: 30_000 })
@@ -206,8 +113,7 @@ test.skipIf(!grok)(
       expect(stored.filter((entry) => entry.endsWith("summary.json"))).toHaveLength(1);
 
       // Paseo detaching never closes the session for the terminal.
-      await client.close();
-      client = undefined;
+      await live.closeClient();
       await daemon.stop();
       const afterDetach = terminal.notifications.length;
       await terminal.call("session/prompt", {
@@ -216,15 +122,7 @@ test.skipIf(!grok)(
       });
       expect(terminal.streamed(afterDetach)).toContain("reply to: still attached");
     } finally {
-      await client?.close().catch(() => undefined);
-      await daemon.stop().catch(() => undefined);
-      terminal.close();
-      try {
-        execFileSync(grok, ["leader", "kill"], { env: grokEnv, stdio: "ignore", timeout: 15_000 });
-      } catch {
-        // No leader left to stop.
-      }
-      await model.close();
+      await live.stop();
     }
   },
 );

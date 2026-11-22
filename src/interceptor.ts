@@ -23,6 +23,13 @@ export type BridgeSignal =
     }
   | { type: "title"; nativeSessionId: string; title: string };
 
+/** A command Grok advertises over ACP. */
+export interface GrokCommand {
+  name: string;
+  description: string;
+  hint?: string;
+}
+
 export interface InterceptorHooks {
   signal(signal: BridgeSignal): void;
   modelState?(state: ModelState): void;
@@ -98,11 +105,35 @@ export class GrokStreamInterceptor {
   private segment = 0;
   private lastChunk: { kind: string; key: string } | null = null;
   private catalogCounter = 0;
+  private sessionCwd: string | null = null;
+  private options: Record<string, unknown>[] = [];
+  private commands: GrokCommand[] | null = null;
+  private sessionTitle: string | null = null;
 
   constructor(private readonly hooks: InterceptorHooks) {}
 
   get nativeSessionId(): string | null {
     return this.native;
+  }
+
+  /** The attached session's working directory. */
+  get cwd(): string | null {
+    return this.sessionCwd;
+  }
+
+  /** The attached session's title, once Grok has reported one. */
+  get title(): string | null {
+    return this.sessionTitle;
+  }
+
+  /** The attached session's ACP config options, as Grok last reported them. */
+  get configOptions(): readonly Record<string, unknown>[] {
+    return this.options;
+  }
+
+  /** Commands Grok advertises for the attached session, or null before its first list. */
+  get advertisedCommands(): readonly GrokCommand[] | null {
+    return this.commands;
   }
 
   /** The turn another client is running in this session, if any. */
@@ -152,6 +183,7 @@ export class GrokStreamInterceptor {
     let forward = message;
     if (method === "session/load") {
       this.attach(text(params["sessionId"]) ?? null);
+      this.sessionCwd = text(params["cwd"]) ?? null;
       this.loading = true;
       forward = { ...message, params: { ...params, mcpServers: [] } };
     }
@@ -180,6 +212,11 @@ export class GrokStreamInterceptor {
   }
 
   private attach(sessionId: string | null): void {
+    if (sessionId !== this.native) {
+      this.options = [];
+      this.commands = null;
+      this.sessionTitle = null;
+    }
     this.native = sessionId;
     this.foreign = null;
     this.segment = 0;
@@ -214,12 +251,20 @@ export class GrokStreamInterceptor {
       }
       case "session/new": {
         const sessionId = text(result["sessionId"]);
-        if (sessionId) this.attach(sessionId);
+        if (sessionId) {
+          this.attach(sessionId);
+          this.sessionCwd = text(pending.params["cwd"]) ?? null;
+          this.readOptions(result["configOptions"]);
+        }
         return message;
       }
       case "session/load":
         this.loading = false;
         if (message["error"]) this.attach(null);
+        else this.readOptions(result["configOptions"]);
+        return message;
+      case "session/set_config_option":
+        this.readOptions(result["configOptions"]);
         return message;
       case "session/prompt":
         this.ownPrompts.delete(id);
@@ -229,6 +274,10 @@ export class GrokStreamInterceptor {
     }
   }
 
+  private readOptions(value: unknown): void {
+    if (Array.isArray(value)) this.options = value.map(record);
+  }
+
   private sessionUpdate(
     message: JsonRpcMessage,
     params: Record<string, unknown>,
@@ -236,9 +285,20 @@ export class GrokStreamInterceptor {
   ): JsonRpcMessage {
     const update = record(params["update"]);
     const kind = text(update["sessionUpdate"]) ?? "";
+    if (kind === "config_option_update") this.readOptions(update["configOptions"]);
+    if (kind === "available_commands_update" && Array.isArray(update["availableCommands"]))
+      this.commands = update["availableCommands"].map(record).flatMap((entry) => {
+        const name = text(entry["name"]);
+        if (!name) return [];
+        const hint = text(record(entry["input"])["hint"]);
+        return [{ name, description: text(entry["description"]) ?? "", ...(hint ? { hint } : {}) }];
+      });
     if (kind === "session_info_update" && typeof update["title"] === "string" && this.native) {
       const title = normalize(update["title"]);
-      if (title) this.hooks.signal({ type: "title", nativeSessionId: this.native, title });
+      if (title) {
+        this.sessionTitle = title;
+        this.hooks.signal({ type: "title", nativeSessionId: this.native, title });
+      }
     }
     if (!CHUNK_KINDS.has(kind)) {
       this.lastChunk = null;

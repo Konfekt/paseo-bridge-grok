@@ -26,7 +26,18 @@ The test asserts, in order:
 6. Paseo's catalog requests did not create extra Grok sessions.
 7. After Paseo disconnects and stops, the terminal can still prompt in the session.
 
-The test is skipped when no `grok` executable is found. `pnpm package:smoke` runs it again against the packed plugin.
+`tests/grok-commands-live.test.ts` uses the same setup (`tests/fixtures/live.ts`) and sends slash commands through Paseo's client API, asserting:
+1. Paseo's command list for the agent contains Grok's advertised commands and the bridge's.
+2. `/help` and a terminal-only command (`/theme`) are answered in Paseo without a model call.
+3. `/model` lists the models; `/model Local B` (a display name) switches the shared session: the terminal receives the config update and Paseo shows the model.
+4. `/rename` reaches the terminal (`session_info_update`) and the Paseo agent title.
+5. `/btw` sends the earlier conversation as context, and a later terminal prompt does not carry the side question in its history.
+6. `/btw` sent with steering while a terminal turn runs is answered without cancelling that turn (`stopReason: end_turn`).
+7. `/recap` shows Grok's recap; `/status` runs Grok's `/session-info` without a model call.
+8. `/plan <task>` puts the session in plan mode (`current_mode_update` in the terminal) and runs the task; `/plan off` returns to the default mode.
+9. `/fork` and `/new <prompt>` create Grok sessions that discovery imports as new agents, the fork under its Grok title, the new one with its prompt and reply.
+
+The tests are skipped when no `grok` executable is found. `pnpm package:smoke` runs them again against the packed plugin.
 
 ## Manual end-to-end check
 
@@ -38,17 +49,19 @@ Run with a real `grok --leader` TUI in tmux, the same fake-model Grok home and s
 - `paseo run --provider grok-terminal` creates a new session on the leader, which discovery does not import a second time.
 - After `paseo daemon stop`, the TUI keeps working in the session.
 - Under 0.17.0 the plugin logs the tentative-host warning and works the same.
+- Slash commands through `paseo send` (0.16.2 and 0.17.0 daemons): `/help`, `/btw` (also with `--behavior steer` during a TUI turn, which keeps running), `/model`, `/rename` (the TUI shows the title), `/plan`, `/recap`, `/fork`, `/new` and a rejected `/theme`; the TUI shows model, title and mode changes.
 
 ## Unit tests
 
-| Area                     | File                                                                         | Covers                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stream rewriting         | `tests/interceptor.test.ts`                                                  | Local catalog answers, swallowed `session/close`, MCP-free load, version rejection and warnings, message IDs, replayed user messages, foreign turns, own-prompt matching, titles |
-| Stream transport         | `tests/stream.test.ts`                                                       | Pass-through, local replies, non-JSON output, unexpected exit with stderr, missing executable                                                                                    |
-| Provider wrapper         | `tests/provider.test.ts`                                                     | Native settings kept on attach, synthetic turns and user messages, failure on detach, turn already running at attach, title routing                                              |
-| Models                   | `tests/models.test.ts`                                                       | Tolerant model-state parsing, synthesized config options, catalog enrichment                                                                                                     |
-| Discovery                | `tests/discovery.test.ts`, `tests/session-workspace.test.ts`                 | Handle matching, import and reload, archived workspaces, isolated failures, lookback, polling with backoff, stable workspace IDs and titles                                      |
-| Titles, launch, versions | `tests/title-sync.test.ts`, `tests/launch.test.ts`, `tests/versions.test.ts` | Debounced titles, launch arguments and status diagnostics, version policy                                                                                                        |
+| Area                     | File                                                                         | Covers                                                                                                                                                                                                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stream rewriting         | `tests/interceptor.test.ts`                                                  | Local catalog answers, swallowed `session/close`, MCP-free load, version rejection and warnings, message IDs, replayed user messages, foreign turns, own-prompt matching, titles                                                                                     |
+| Stream transport         | `tests/stream.test.ts`                                                       | Pass-through, local replies, non-JSON output, unexpected exit with stderr, missing executable, bridge requests with hidden answers, notification listeners, hidden sessions                                                                                          |
+| Provider wrapper         | `tests/provider.test.ts`                                                     | Native settings kept on attach, synthetic turns and user messages, failure on detach, turn already running at attach, title routing, back-to-back turns, steering capability, command list, local command turns, aliases, steered side commands, `/plan` with a task |
+| Slash commands           | `tests/commands.test.ts`, `tests/command-runner.test.ts`                     | Parsing, routing precedence, rejection and help texts, Grok's command reference, model resolution; each bridge command against a fake Grok stream, and failures as replies                                                                                           |
+| Models                   | `tests/models.test.ts`                                                       | Tolerant model-state parsing, synthesized config options, catalog enrichment                                                                                                                                                                                         |
+| Discovery                | `tests/discovery.test.ts`, `tests/session-workspace.test.ts`                 | Handle matching, import and reload, archived workspaces, isolated failures, lookback, polling with backoff, stable workspace IDs and titles                                                                                                                          |
+| Titles, launch, versions | `tests/title-sync.test.ts`, `tests/launch.test.ts`, `tests/versions.test.ts` | Debounced titles, launch arguments and status diagnostics, version policy                                                                                                                                                                                            |
 
 ## Checking a new release
 
@@ -62,6 +75,8 @@ What tends to break, and how it shows:
 - **`initialize._meta.modelState` reshaped**: Paseo's catalog falls back to Paseo's generic ACP behaviour; model lists may be empty or create a temporary Grok session.
 - **Leader flags or socket changes**: the provider fails to start; the plugin log shows Grok's stderr.
 - **`session/list` changes**: nothing is imported.
+- **Extension methods renamed or reshaped** (`_x.ai/btw`, `_x.ai/recap` with its `session_recap` notification, `_x.ai/session/rename`, `_x.ai/session/fork`, `session/set_mode` IDs): that bridge command replies with Grok's error in Paseo (for example `/btw failed: Method not found`); everything else keeps working. If Grok starts advertising a command of the same name, Grok's version runs instead.
+- **New terminal commands**: rejected clearly once they appear in Grok's installed command reference; otherwise they reach Grok as text. Add them to `TERMINAL_COMMANDS` in `src/commands.ts`.
 
 For a new **Paseo** release:
 1. Bump the four `@getpaseo/*` dependencies together, run `pnpm install`, then `pnpm verify`.

@@ -126,13 +126,19 @@ export async function connectPaseoHost(
           throw new Error("Paseo directory page limit reached");
         },
         async importSession(session) {
-          return (await importIntoSessionWorkspace(
+          const agent = (await importIntoSessionWorkspace(
             {
               importAgent: (input) => client.importAgent(input),
               createWorkspace: (input) => client.createWorkspace(input),
             },
             session,
-          )) as AttachedAgent;
+          )) as AttachedAgent & { title?: string | null };
+          // Paseo titles an import after its first prompt; Grok's own title (for example
+          // one given by `/rename` or `/fork`) is not always replayed when the session loads.
+          const title = sessionWorkspaceTitle({ title: session.title });
+          if (title && agent.title !== title)
+            await client.updateAgent(agent.id, { name: title }).catch(() => undefined);
+          return agent;
         },
         async load(agentId) {
           await client.fetchAgentTimeline(agentId, { direction: "tail", limit: 1 });

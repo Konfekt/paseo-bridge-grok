@@ -60,3 +60,56 @@ test("a missing executable is named", async () => {
     ),
   ).rejects.toThrow("Grok Build executable not found: /nonexistent/grok");
 });
+
+/** A stand-in agent for bridge requests: notifies before answering, and fails on "fail". */
+const NOTIFYING = `
+const rl = require("node:readline").createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\\n");
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "fail") return send({ id: message.id, error: { code: -32601, message: "nope" } });
+  send({ method: "session/update", params: { sessionId: message.params?.sessionId, update: {} } });
+  send({ id: message.id, result: { method: message.method } });
+});`;
+
+test("bridge requests get their own answers, which never reach Paseo", async () => {
+  const stream = await spawnGrokStream(
+    {
+      command: process.execPath,
+      args: ["-e", NOTIFYING],
+      env: { PATH: process.env["PATH"] ?? "" },
+    },
+    { signal: () => undefined },
+  );
+  const seen: unknown[] = [];
+  const stop = stream.onNotification((message) => seen.push(message["params"]));
+  const reader = stream.readable.getReader();
+  const forwarded: unknown[] = [];
+  void (async () => {
+    for (;;) {
+      const next = await reader.read().catch(() => ({ done: true, value: undefined }));
+      if (next.done) return;
+      forwarded.push(next.value);
+    }
+  })();
+
+  expect(await stream.request("_x.ai/btw", { sessionId: "s1" })).toEqual({ method: "_x.ai/btw" });
+  await expect(stream.request("fail", {})).rejects.toThrow("nope");
+  stream.hideSession("hidden");
+  await stream.request("ping", { sessionId: "hidden" });
+  stop();
+  await stream.request("ping", { sessionId: "s2" });
+
+  await expect.poll(() => forwarded.length).toBe(2);
+  // Paseo sees the notifications of visible sessions only, and none of the answers.
+  expect(forwarded).toEqual([
+    { jsonrpc: "2.0", method: "session/update", params: { sessionId: "s1", update: {} } },
+    { jsonrpc: "2.0", method: "session/update", params: { sessionId: "s2", update: {} } },
+  ]);
+  // Listeners see every notification until they stop listening.
+  expect(seen).toEqual([
+    { sessionId: "s1", update: {} },
+    { sessionId: "hidden", update: {} },
+  ]);
+  await reader.cancel();
+});
