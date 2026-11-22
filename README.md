@@ -120,6 +120,32 @@ Global Grok options can follow the binary, for example `["grok", "--leader-socke
 
 Grok, its home and the Paseo daemon must be on the same machine. For a remote machine, install Paseo and this plugin there and add that daemon as a host in the Paseo app.
 
+## Slash commands
+
+Paseo's command menu lists Grok's own commands and the bridge's. Type `/help` in Paseo for the list that applies to the session.
+
+| Command                          | Handled by | What it does                                                                                                                      |
+| -------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Commands Grok advertises         | Grok       | Run natively, for example `/compact`, `/context`, `/session-info`, `/always-approve`, `/goal`, `/loop`.                           |
+| `/status`, `/info`               | Grok       | Run as `/session-info`.                                                                                                           |
+| `/btw <question>`                | Bridge     | Asks Grok a side question with the session as context. The answer shows in Paseo and stays out of the conversation.               |
+| `/model [model] [effort]` (`/m`) | Bridge     | Lists the session's models, or switches model (ID or name) and optionally reasoning effort. The terminal follows.                 |
+| `/effort [level]`                | Bridge     | Shows or sets the reasoning effort of the current model.                                                                          |
+| `/rename <title>`                | Bridge     | Renames the Grok session; the terminal, the agent and its workspace take the title.                                               |
+| `/recap`                         | Bridge     | Grok's one-sentence summary of the session.                                                                                       |
+| `/plan [task]`, `/plan off`      | Bridge     | Switches the session to Grok's plan mode, and runs the task there if one is given; `/plan off` leaves it.                         |
+| `/fork [title]`                  | Bridge     | Copies the session into a new Grok session, which Paseo lists as a new agent.                                                     |
+| `/new <prompt>` (`/clear`)       | Bridge     | Starts a new Grok session in the same folder with the prompt; Paseo lists it as a new agent.                                      |
+| `/help`                          | Bridge     | Lists the commands available in Paseo.                                                                                            |
+| Other Grok commands              | Rejected   | Answered in Paseo with a note that the command only works in the Grok terminal, and what to use instead. Nothing is sent to Grok. |
+
+Grok's own commands always take precedence: a command Grok starts offering to Paseo in a later release runs natively, even if the bridge has one of the same name. Commands Grok only offers in its terminal are recognised from a built-in list and from the command reference Grok installs (`$GROK_HOME/docs/user-guide`), so terminal commands added later are rejected clearly as well. Text such as `/usr/bin/env is missing` is sent as a normal message.
+
+Limits of the bridge commands:
+- `/new` and `/fork` cannot move the current agent to another session; Paseo shows the new session as a separate agent within a few seconds. `/new` needs a prompt because Grok lists a session only once it has a message; Paseo's new-agent button starts an empty one.
+- `/rename --auto`, `/remember`, `/resume` and the other terminal commands are rejected.
+- While a turn runs, Paseo interrupts it before sending, unless **Settings → Default send** is **Steer** (or `paseo send --behavior steer`). With steering, `/btw`, `/recap`, `/rename`, `/fork`, `/new`, `/help` and rejected commands are answered beside the running turn; commands that change the session (`/model`, `/effort`, `/plan`) are not, so Paseo interrupts the turn as usual.
+
 ## Troubleshooting
 
 - **Grok Terminal is `unavailable`.** `paseo provider ls` shows the reason. _Executable not found_: install Grok Build or set `command` as above. _Grok Build 1.0.60 or newer is required_: run `grok update`.
@@ -134,7 +160,7 @@ Grok, its home and the Paseo daemon must be on the same machine. For a remote ma
 ## Limits
 
 - Paseo lists sessions, not running windows. A terminal turn that is already running when Paseo attaches shows as running; one that ran while Paseo was not attached appears in the history.
-- Sending a message in Paseo while a terminal turn runs may cancel that turn first, as Paseo does for its own running turns. Wait for the turn to finish, or send from the terminal.
+- Sending a message in Paseo while a terminal turn runs may cancel that turn first, as Paseo does for its own running turns. Wait for the turn to finish, send from the terminal, or use steering for the side commands above.
 - Paseo's MCP servers are not attached to terminal sessions; the session keeps the terminal's tools.
 - Tool permission requests are answered by the client that sent the prompt; answering a terminal's pending request from Paseo has not been verified.
 - Each attached agent keeps one `grok agent` client process (about 70 MB) while Paseo has it open.
@@ -147,7 +173,7 @@ pnpm format
 pnpm verify
 ```
 
-`pnpm verify` runs Biome, strict type checks, the tests, the build and a package check that installs the packed plugin from a clean copy of the tracked files. The live test (`tests/grok-live.test.ts`) needs a `grok` executable (`GROK_BIN` or `PATH`) and is skipped without one; it uses a throwaway Grok home with a local fake model, so no account or network model is needed. See [docs/verification.md](docs/verification.md).
+`pnpm verify` runs Biome, strict type checks, the tests, the build and a package check that installs the packed plugin from a clean copy of the tracked files. The live tests (`tests/grok-live.test.ts`, `tests/grok-commands-live.test.ts`) need a `grok` executable (`GROK_BIN` or `PATH`) and are skipped without one; they use a throwaway Grok home with a local fake model, so no account or network model is needed. See [docs/verification.md](docs/verification.md).
 
 ## License
 

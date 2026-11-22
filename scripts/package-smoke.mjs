@@ -86,6 +86,7 @@ execFileSync(
     join(source, "node_modules/vitest/vitest.mjs"),
     "run",
     "tests/grok-live.test.ts",
+    "tests/grok-commands-live.test.ts",
     "--reporter=verbose",
   ],
   {

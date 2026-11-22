@@ -41,7 +41,7 @@ export async function startModelServer(options: { slowMs?: number } = {}): Promi
       const userText = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/.exec(content)?.[1] ?? content;
       if (/\bslow\b/.test(userText) && options.slowMs)
         await new Promise((resolve) => setTimeout(resolve, options.slowMs));
-      const reply = `reply to: ${userText.trim().slice(0, 200)}`;
+      const reply = `reply to: ${userText.trim().slice(-200)}`;
       const base = {
         id: "chat",
         object: "chat.completion.chunk",
