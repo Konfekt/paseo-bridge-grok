@@ -16,7 +16,7 @@ import {
 } from "./commands.js";
 import { AGENT_ID_ENV, PROVIDER_ID } from "./ids.js";
 import type { BridgeSignal } from "./interceptor.js";
-import { agentLaunch, DEFAULT_COMMAND, grokStatus } from "./launch.js";
+import { agentLaunch, DEFAULT_COMMAND, type GrokCli, grokCli, grokStatus } from "./launch.js";
 import { enrichCatalog, type ModelState } from "./models.js";
 import { type GrokStream, spawnGrokStream } from "./stream.js";
 
@@ -31,6 +31,8 @@ const TURN_END_DELAY_MS = 50;
 export interface GrokProviderOptions {
   /** Grok terminal commands the bridge rejects instead of sending them to the model. */
   terminalCommands?: ReadonlySet<string>;
+  /** The Grok CLI, for bridge commands that Grok offers only as subcommands. */
+  cli?: GrokCli;
   /** Grok renamed the session of a Paseo agent. */
   onTitle?(agentId: string, title: string): void;
   warn?(message: string): void;
@@ -167,7 +169,7 @@ export function wrapConnection(
       });
       return true;
     }
-    const runner = new CommandRunner(stream, terminalCommands);
+    const runner = new CommandRunner(stream, terminalCommands, options.cli);
     // `/plan <task>` switches the mode, then runs the task as the prompt itself.
     if (
       route.kind === "bridge" &&
@@ -400,6 +402,7 @@ export function createGrokProvider(options: GrokProviderOptions = {}): ProviderR
       return wrapConnection(inner, streams, (listener) => subscribers.add(listener), {
         ...options,
         terminalCommands,
+        cli: grokCli(launch),
       });
     },
   };

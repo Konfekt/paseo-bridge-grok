@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CommandRunner, isPlanOff } from "../src/command-runner.js";
-import { BRIDGE_COMMANDS } from "../src/commands.js";
+import { BRIDGE_COMMANDS, usageText } from "../src/commands.js";
 import type { GrokCommand } from "../src/interceptor.js";
 import type { GrokStream } from "../src/stream.js";
 
@@ -171,5 +171,63 @@ test("failures become a reply instead of an exception", async () => {
   });
   expect((await run(fake.stream, "help")).text).toContain(
     "**Terminal only** (rejected here): /theme",
+  );
+});
+
+test("/usage and /export run Grok's CLI for the attached session", async () => {
+  const fake = fakeStream();
+  const calls: [readonly string[], string | undefined][] = [];
+  const cli = async (args: readonly string[], cwd?: string) => {
+    calls.push([args, cwd]);
+    return args[0] === "usage" ? "Total: 1,234 tokens" : "";
+  };
+  const runner = new CommandRunner(fake.stream, new Set(), cli);
+  expect((await runner.run(command("usage"), "")).text).toBe("```\nTotal: 1,234 tokens\n```");
+  expect(
+    usageText(
+      JSON.stringify({
+        session: {
+          inputTokens: 1200,
+          outputTokens: 34,
+          totalTokens: 1234,
+          modelCalls: 2,
+          turnCount: 1,
+          primaryModelId: "m",
+        },
+        turns: [
+          { turnNumber: 1, inputTokens: 1200, outputTokens: 34, totalTokens: 1234, modelCalls: 2 },
+        ],
+      }),
+    ),
+  ).toBe(
+    "**Session:** 1,234 tokens (1,200 input, 34 output, 0 cached, 0 reasoning), 2 model calls, m over 1 turn.\n\n**Turns**\n- Turn 1: 1,234 tokens (1,200 input, 34 output, 0 cached, 0 reasoning), 2 model calls",
+  );
+  await runner.run(command("usage"), "2");
+  expect(await runner.run(command("usage"), "last")).toMatchObject({ error: true });
+  expect((await runner.run(command("export"), "")).text).toBe(
+    "Exported the transcript to `/project/grok-session-s1.md`.",
+  );
+  await runner.run(command("export"), "/tmp/out.md");
+  expect(calls).toEqual([
+    [["usage", "s1"], undefined],
+    [["usage", "s1", "2"], undefined],
+    [["export", "s1", "/project/grok-session-s1.md"], "/project"],
+    [["export", "s1", "/tmp/out.md"], "/project"],
+  ]);
+  expect(fake.requests).toEqual([]);
+});
+
+test("/usage and /export report a CLI failure, and a missing CLI", async () => {
+  const fake = fakeStream();
+  const failing = new CommandRunner(fake.stream, new Set(), async () => {
+    throw new Error("grok export failed: file exists");
+  });
+  expect(await failing.run(command("export"), "taken.md")).toEqual({
+    type: "reply",
+    text: "/export failed: grok export failed: file exists",
+    error: true,
+  });
+  expect((await run(fake.stream, "usage")).text).toBe(
+    "/usage failed: the Grok CLI is not available to the bridge",
   );
 });

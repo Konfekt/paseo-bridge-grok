@@ -89,6 +89,20 @@ export const BRIDGE_COMMANDS: readonly BridgeCommand[] = [
     aside: true,
   },
   {
+    name: "usage",
+    aliases: ["cost"],
+    description: "Show this session's token and cost usage, in total or for one turn",
+    argumentHint: "[turn]",
+    aside: true,
+  },
+  {
+    name: "export",
+    aliases: [],
+    description: "Export this session's transcript as Markdown to a new file in its folder",
+    argumentHint: "[file]",
+    aside: true,
+  },
+  {
     name: "help",
     aliases: [],
     description: "List the commands available here",
@@ -119,7 +133,6 @@ export const TERMINAL_COMMANDS: readonly string[] = [
   "connectors",
   "context-window",
   "copy",
-  "cost",
   "dashboard",
   "delete",
   "density",
@@ -129,7 +142,6 @@ export const TERMINAL_COMMANDS: readonly string[] = [
   "edit-prompt",
   "exit",
   "expand",
-  "export",
   "find",
   "flush",
   "full",
@@ -176,7 +188,6 @@ export const TERMINAL_COMMANDS: readonly string[] = [
   "tour",
   "tutorial",
   "undo",
-  "usage",
   "view-plan",
   "vim-mode",
   "welcome",
@@ -185,7 +196,9 @@ export const TERMINAL_COMMANDS: readonly string[] = [
 
 /** What to use instead, for rejected commands where Paseo has an equivalent. */
 const ALTERNATIVES: Readonly<Record<string, string>> = {
-  resume: "Paseo lists your Grok sessions as agents; open the one you want.",
+  resume:
+    "Paseo lists your Grok sessions as agents; open the one you want. To continue this one in a terminal, run `grok --leader -r <session ID or title>` there (`/status` shows the ID).",
+  copy: "Use Paseo's copy action on the message, or `/export` for the whole transcript.",
   sessions: "Paseo lists your Grok sessions as agents; open the one you want.",
   dashboard: "Paseo lists your Grok sessions as agents; open the one you want.",
   "agents-dashboard": "Paseo lists your Grok sessions as agents; open the one you want.",
@@ -376,4 +389,55 @@ export function resolveModelArgs(
   return {
     error: `Unknown model "${args}". Available: ${models.map((entry) => entry.value).join(", ")}.`,
   };
+}
+
+interface UsageTotals {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  modelCalls?: number;
+  turnCount?: number;
+  turnNumber?: number;
+  primaryModelId?: string;
+}
+
+const count = (value: number | undefined) => (value ?? 0).toLocaleString("en-US");
+
+function usageLine(totals: UsageTotals): string {
+  const parts = [
+    `${count(totals.inputTokens)} input`,
+    `${count(totals.outputTokens)} output`,
+    `${count(totals.cachedReadTokens)} cached`,
+    `${count(totals.reasoningTokens)} reasoning`,
+  ];
+  const calls = totals.modelCalls ?? 0;
+  return `${count(totals.totalTokens)} tokens (${parts.join(", ")}), ${calls} model call${calls === 1 ? "" : "s"}${totals.primaryModelId ? `, ${totals.primaryModelId}` : ""}`;
+}
+
+/** `grok usage <session> [turn]` output as text; other output is shown as it is. */
+export function usageText(output: string): string {
+  let parsed: { session?: UsageTotals; turns?: UsageTotals[] } | undefined;
+  try {
+    parsed = JSON.parse(output) as typeof parsed;
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || (!parsed.session && !Array.isArray(parsed.turns)))
+    return output
+      ? `\`\`\`\n${output}\n\`\`\``
+      : "Grok has recorded no usage for this session yet.";
+  const lines: string[] = [];
+  if (parsed.session)
+    lines.push(
+      `**Session:** ${usageLine(parsed.session)} over ${parsed.session.turnCount ?? 0} turn${parsed.session.turnCount === 1 ? "" : "s"}.`,
+    );
+  const turns = Array.isArray(parsed.turns) ? parsed.turns : [];
+  const shown = turns.slice(-10);
+  if (shown.length) {
+    lines.push("", turns.length > shown.length ? `**Last ${shown.length} turns**` : "**Turns**");
+    for (const turn of shown) lines.push(`- Turn ${turn.turnNumber ?? "?"}: ${usageLine(turn)}`);
+  }
+  return lines.join("\n");
 }

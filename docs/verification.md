@@ -37,6 +37,14 @@ The test asserts, in order:
 8. `/plan <task>` puts the session in plan mode (`current_mode_update` in the terminal) and runs the task; `/plan off` returns to the default mode.
 9. `/fork` and `/new <prompt>` create Grok sessions that discovery imports as new agents, the fork under its Grok title, the new one with its prompt and reply.
 
+`tests/grok-paseo-created-live.test.ts` starts the session from Paseo instead, as the app's new-agent button does, and asserts:
+1. Paseo creates a Grok session on the leader and runs a message in it.
+2. `/status` shows the session ID, `/usage` Grok's persisted token totals, and `/export` writes the transcript file.
+3. Grok lists the session, and the terminal joins it with `session/load` and sees its history (what `grok --leader -r <ID>` does).
+4. A terminal turn on that session shows in Paseo as a running turn and its reply reaches the timeline.
+5. A later Paseo message reaches the terminal, with neither side closed.
+6. Discovery does not import the Paseo-created session a second time.
+
 The tests are skipped when no `grok` executable is found. `pnpm package:smoke` runs them again against the packed plugin.
 
 ## Manual end-to-end check
@@ -58,7 +66,7 @@ Run with a real `grok --leader` TUI in tmux, the same fake-model Grok home and s
 | Stream rewriting         | `tests/interceptor.test.ts`                                                  | Local catalog answers, swallowed `session/close`, MCP-free load, version rejection and warnings, message IDs, replayed user messages, foreign turns, own-prompt matching, titles                                                                                     |
 | Stream transport         | `tests/stream.test.ts`                                                       | Pass-through, local replies, non-JSON output, unexpected exit with stderr, missing executable, bridge requests with hidden answers, notification listeners, hidden sessions                                                                                          |
 | Provider wrapper         | `tests/provider.test.ts`                                                     | Native settings kept on attach, synthetic turns and user messages, failure on detach, turn already running at attach, title routing, back-to-back turns, steering capability, command list, local command turns, aliases, steered side commands, `/plan` with a task |
-| Slash commands           | `tests/commands.test.ts`, `tests/command-runner.test.ts`                     | Parsing, routing precedence, rejection and help texts, Grok's command reference, model resolution; each bridge command against a fake Grok stream, and failures as replies                                                                                           |
+| Slash commands           | `tests/commands.test.ts`, `tests/command-runner.test.ts`                     | Parsing, routing precedence, rejection and help texts, Grok's command reference, model resolution; each bridge command against a fake Grok stream or CLI, usage formatting, and failures as replies                                                                  |
 | Models                   | `tests/models.test.ts`                                                       | Tolerant model-state parsing, synthesized config options, catalog enrichment                                                                                                                                                                                         |
 | Discovery                | `tests/discovery.test.ts`, `tests/session-workspace.test.ts`                 | Handle matching, import and reload, archived workspaces, isolated failures, lookback, polling with backoff, stable workspace IDs and titles                                                                                                                          |
 | Titles, launch, versions | `tests/title-sync.test.ts`, `tests/launch.test.ts`, `tests/versions.test.ts` | Debounced titles, launch arguments and status diagnostics, version policy                                                                                                                                                                                            |

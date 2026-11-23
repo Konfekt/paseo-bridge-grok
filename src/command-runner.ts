@@ -1,11 +1,14 @@
+import { isAbsolute, resolve } from "node:path";
 import {
   type BridgeCommand,
   configOption,
   helpText,
   modelListText,
   resolveModelArgs,
+  usageText,
 } from "./commands.js";
 import { errorMessage } from "./errors.js";
+import type { GrokCli } from "./launch.js";
 import type { GrokStream } from "./stream.js";
 
 /** The outcome of a bridge command: text to show, or a prompt to run in the session. */
@@ -42,6 +45,7 @@ export class CommandRunner {
   constructor(
     private readonly stream: GrokStream,
     private readonly terminalCommands: ReadonlySet<string>,
+    private readonly cli?: GrokCli,
   ) {}
 
   private get sessionId(): string {
@@ -87,6 +91,10 @@ export class CommandRunner {
         return reply(await this.fork(args));
       case "new":
         return this.newSession(args);
+      case "usage":
+        return this.usage(args);
+      case "export":
+        return this.exportTranscript(args);
       default:
         return reply(`/${command.name} is not implemented.`, true);
     }
@@ -259,6 +267,33 @@ export class CommandRunner {
     return {
       type: "reply",
       text: "Started a new Grok session with your prompt. Paseo lists it as a new agent within a few seconds; this agent stays on the current session.",
+    };
+  }
+
+  private requireCli(): GrokCli {
+    if (!this.cli) throw new Error("the Grok CLI is not available to the bridge");
+    return this.cli;
+  }
+
+  /** Grok's persisted token and cost totals (`grok usage <session> [turn]`). */
+  private async usage(args: string): Promise<CommandOutcome> {
+    const turn = args.trim();
+    if (turn && !/^\d+$/.test(turn))
+      return { type: "reply", text: "Usage: `/usage [turn number]`.", error: true };
+    const output = await this.requireCli()(["usage", this.sessionId, ...(turn ? [turn] : [])]);
+    return { type: "reply", text: usageText(output) };
+  }
+
+  /** The transcript as Markdown in a new file (`grok export <session> <file>`). */
+  private async exportTranscript(args: string): Promise<CommandOutcome> {
+    const cwd = this.stream.interceptor.cwd;
+    if (!cwd) throw new Error("the session's folder is unknown");
+    const name = args.trim() || `grok-session-${this.sessionId}.md`;
+    const file = isAbsolute(name) ? name : resolve(cwd, name);
+    const output = await this.requireCli()(["export", this.sessionId, file], cwd);
+    return {
+      type: "reply",
+      text: `Exported the transcript to \`${file}\`.${output ? `\n\n${output}` : ""}`,
     };
   }
 }
