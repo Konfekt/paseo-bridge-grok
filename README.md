@@ -89,7 +89,19 @@ Start `grok --leader` in a project and send a first prompt. Within a few seconds
 | Close the terminal                        | The session stays attached in Paseo and keeps working there.                                |
 | Close Paseo or the plugin                 | The terminal keeps its session.                                                             |
 | Archive the agent or workspace in Paseo   | The session is not imported again.                                                          |
-| Create a **Grok Terminal** agent in Paseo | Starts a new Grok session on the leader, which `grok --leader` can resume (`/resume`).      |
+| Create a **Grok Terminal** agent in Paseo | Starts a Grok session on the leader; see [below](#sessions-started-in-paseo).               |
+
+### Sessions started in Paseo
+
+A session can start on either side, and both sides stay usable at the same time; neither has to be closed for the other to continue. A **Grok Terminal** agent created in Paseo, for example in the Android app, is an ordinary Grok session on the same leader:
+
+```
+ Paseo app --- new Grok Terminal agent ---\
+                                           +-- Grok leader -- one live session
+ grok --leader -r <session ID or title> --/
+```
+
+After its first message, continue it at the computer with `grok --leader -r <session ID or title>`, or pick it from `/resume` in a `grok --leader` window. `/status` in Paseo shows the session ID; Paseo's agent title is Grok's session title. The terminal joins the running session with its history, its turns show live in Paseo, and messages from Paseo keep running in it. Discovery recognises the session and does not import it a second time. Grok lists and resumes a session only once it has a message, so send the first prompt before switching.
 
 Discovery imports sessions active in the last 24 hours. Change the window with the environment variable `PASEO_BRIDGE_GROK_LOOKBACK_HOURS` on the Paseo daemon, or import older sessions once:
 
@@ -136,6 +148,8 @@ Paseo's command menu lists Grok's own commands and the bridge's. Type `/help` in
 | `/plan [task]`, `/plan off`      | Bridge     | Switches the session to Grok's plan mode, and runs the task there if one is given; `/plan off` leaves it.                         |
 | `/fork [title]`                  | Bridge     | Copies the session into a new Grok session, which Paseo lists as a new agent.                                                     |
 | `/new <prompt>` (`/clear`)       | Bridge     | Starts a new Grok session in the same folder with the prompt; Paseo lists it as a new agent.                                      |
+| `/usage [turn]` (`/cost`)        | Bridge     | Shows the session's token usage in total and per turn, from `grok usage <session>`. No model call.                                |
+| `/export [file]`                 | Bridge     | Writes the transcript as Markdown to a new file, by default `grok-session-<ID>.md` in the session's folder (`grok export`).       |
 | `/help`                          | Bridge     | Lists the commands available in Paseo.                                                                                            |
 | Other Grok commands              | Rejected   | Answered in Paseo with a note that the command only works in the Grok terminal, and what to use instead. Nothing is sent to Grok. |
 
@@ -143,8 +157,8 @@ Grok's own commands always take precedence: a command Grok starts offering to Pa
 
 Limits of the bridge commands:
 - `/new` and `/fork` cannot move the current agent to another session; Paseo shows the new session as a separate agent within a few seconds. `/new` needs a prompt because Grok lists a session only once it has a message; Paseo's new-agent button starts an empty one.
-- `/rename --auto`, `/remember`, `/resume` and the other terminal commands are rejected.
-- While a turn runs, Paseo interrupts it before sending, unless **Settings → Default send** is **Steer** (or `paseo send --behavior steer`). With steering, `/btw`, `/recap`, `/rename`, `/fork`, `/new`, `/help` and rejected commands are answered beside the running turn; commands that change the session (`/model`, `/effort`, `/plan`) are not, so Paseo interrupts the turn as usual.
+- `/rename --auto`, `/remember`, `/resume`, `/copy` and the other terminal commands are rejected; `/resume` explains how to continue the session in a terminal, `/copy` points to Paseo's copy action. `/export` refuses a file name that is taken, as Grok does. `/usage` without a session ID (the plan's limit) remains a terminal command (`grok usage`).
+- While a turn runs, Paseo interrupts it before sending, unless **Settings → Default send** is **Steer** (or `paseo send --behavior steer`). With steering, `/btw`, `/recap`, `/rename`, `/fork`, `/new`, `/usage`, `/export`, `/help` and rejected commands are answered beside the running turn; commands that change the session (`/model`, `/effort`, `/plan`) are not, so Paseo interrupts the turn as usual.
 
 ## Troubleshooting
 

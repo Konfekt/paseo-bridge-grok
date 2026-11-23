@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { ProviderLaunch } from "@getpaseo/plugin/server/provider";
 import {
   grokSupport,
@@ -37,6 +37,42 @@ export function agentLaunch(launch?: ProviderLaunch): GrokLaunch {
   const configured = launch?.args ?? [];
   const args = configured.includes("agent") ? [...configured] : [...configured, ...AGENT_ARGS];
   return { command, args, env: launch?.env ? { ...launch.env } : inheritedEnv() };
+}
+
+/** Runs a Grok CLI subcommand, such as `usage <session>`, and resolves with its output. */
+export type GrokCli = (args: readonly string[], cwd?: string) => Promise<string>;
+
+const CLI_TIMEOUT_MS = 60_000;
+const CLI_MAX_OUTPUT = 8 * 1024 * 1024;
+
+/**
+ * The Grok CLI of a launch: the same executable, environment and global options (such as
+ * `--leader-socket PATH`) as the ACP command, without its `agent` arguments.
+ */
+export function grokCli(launch: GrokLaunch): GrokCli {
+  const agent = launch.args.indexOf("agent");
+  const globals = agent >= 0 ? launch.args.slice(0, agent) : [...launch.args];
+  return (args, cwd) =>
+    new Promise((resolve, reject) => {
+      execFile(
+        launch.command,
+        [...globals, ...args],
+        {
+          env: launch.env,
+          ...(cwd ? { cwd } : {}),
+          timeout: CLI_TIMEOUT_MS,
+          maxBuffer: CLI_MAX_OUTPUT,
+        },
+        (error, stdout, stderr) => {
+          if (!error) {
+            resolve(String(stdout).trim());
+            return;
+          }
+          const detail = String(stderr).trim() || String(stdout).trim() || error.message;
+          reject(new Error(`grok ${args[0] ?? ""} failed: ${detail}`));
+        },
+      );
+    });
 }
 
 export type GrokStatus =

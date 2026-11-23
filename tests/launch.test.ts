@@ -2,7 +2,7 @@ import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { AGENT_ARGS, agentLaunch, grokStatus } from "../src/launch.js";
+import { AGENT_ARGS, agentLaunch, grokCli, grokStatus } from "../src/launch.js";
 
 function launch(command: string, args: string[] = []) {
   return { command, args, env: { PATH: process.env["PATH"] ?? "" } };
@@ -41,4 +41,25 @@ test("status reports supported, newer and too old releases", async () => {
     available: false,
     diagnostic: expect.stringContaining("install.sh"),
   });
+});
+
+test("the Grok CLI keeps the launch's executable, environment and global options", async () => {
+  const cli = grokCli({
+    command: process.execPath,
+    args: [
+      "-e",
+      "console.log(JSON.stringify([process.argv.slice(1), process.env.GROK_HOME]))",
+      "agent",
+      "--leader",
+      "stdio",
+    ],
+    env: { GROK_HOME: "/grok-home" },
+  });
+  expect(JSON.parse(await cli(["usage", "s1"]))).toEqual([["usage", "s1"], "/grok-home"]);
+  const failing = grokCli({
+    command: process.execPath,
+    args: ["-e", "console.error('no session'); process.exit(3)"],
+    env: {},
+  });
+  await expect(failing(["usage", "s1"])).rejects.toThrow("grok usage failed: no session");
 });
