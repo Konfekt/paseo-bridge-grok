@@ -25,13 +25,17 @@ export type HostClient = ReturnType<typeof createHostClient>;
  * Real Grok Build in a throwaway home with a local fake model, a terminal stand-in that has
  * saved a first prompt, and the released Paseo server with this plugin installed.
  */
-export async function startLive(grok: string, firstPrompt: string) {
+export async function startLive(
+  grok: string,
+  firstPrompt: string,
+  options: { reasoning?: boolean } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "pbg-live-"));
   const grokHome = join(root, "grok");
   const paseoHome = join(root, "paseo");
   const project = join(root, "project");
   await Promise.all([mkdir(grokHome), mkdir(paseoHome), mkdir(project)]);
-  const model = await startModelServer({ slowMs: 2_500 });
+  const model = await startModelServer({ slowMs: 2_500, ...options });
   await writeFile(join(grokHome, "config.toml"), grokConfig(model.url));
   const grokEnv = {
     ...process.env,
@@ -119,6 +123,7 @@ export async function startLive(grok: string, firstPrompt: string) {
     });
     return {
       grokHome,
+      grokEnv,
       project,
       model,
       terminal,

@@ -4,9 +4,12 @@ import { createServer, type Server } from "node:http";
 /**
  * A local OpenAI Chat Completions endpoint for Grok Build's custom models, so the real
  * `grok` binary runs complete turns without an xAI account. It answers
- * `reply to: <last user text>`; a prompt containing `slow` answers after a delay.
+ * `reply to: <last user text>`, optionally after reasoning `thinking about <last user text>`;
+ * a prompt containing `slow` answers after a delay.
  */
-export async function startModelServer(options: { slowMs?: number } = {}): Promise<{
+export async function startModelServer(
+  options: { slowMs?: number; reasoning?: boolean } = {},
+): Promise<{
   url: string;
   requests: Array<Record<string, unknown>>;
   close(): Promise<void>;
@@ -51,6 +54,10 @@ export async function startModelServer(options: { slowMs?: number } = {}): Promi
       const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
       if (parsed["stream"]) {
         response.writeHead(200, { "content-type": "text/event-stream" });
+        if (options.reasoning)
+          response.write(
+            `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", reasoning_content: `thinking about ${userText.trim().slice(-200)}` }, finish_reason: null }] })}\n\n`,
+          );
         response.write(
           `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: reply }, finish_reason: null }] })}\n\n`,
         );

@@ -21,7 +21,8 @@ export type BridgeSignal =
       state: TurnEndState;
       error?: string;
     }
-  | { type: "title"; nativeSessionId: string; title: string };
+  | { type: "title"; nativeSessionId: string; title: string }
+  | { type: "notice"; nativeSessionId: string; id: string; title: string };
 
 /** A command Grok advertises over ACP. */
 export interface GrokCommand {
@@ -40,6 +41,21 @@ export interface InterceptorHooks {
 export const CATALOG_SESSION_PREFIX = "paseo-bridge-grok-catalog-";
 
 const CHUNK_KINDS = new Set(["agent_message_chunk", "agent_thought_chunk", "user_message_chunk"]);
+/** How many delivered update keys to remember for matching the session log against. */
+const SEEN_LIMIT = 10_000;
+
+/**
+ * Identity of a session update across Grok's live stream and its session log
+ * (`updates.jsonl`). The log stores each message once, under the event ID and timestamp of
+ * its last streamed chunk, so a logged entry matches the live chunk that completed it.
+ */
+export function updateKey(params: unknown): string | undefined {
+  const meta = record(record(params)["_meta"]);
+  const eventId = text(meta["eventId"]);
+  if (!eventId) return undefined;
+  const at = meta["agentTimestampMs"];
+  return `${eventId}@${typeof at === "number" || typeof at === "string" ? at : ""}`;
+}
 
 type Id = string | number;
 
@@ -109,6 +125,11 @@ export class GrokStreamInterceptor {
   private options: Record<string, unknown>[] = [];
   private commands: GrokCommand[] | null = null;
   private sessionTitle: string | null = null;
+  private readonly seen = new Set<string>();
+  private attachments = 0;
+  private warnedLog = false;
+  private loggedTurn: string | null = null;
+  private loggedUser: { id: string; text: string } | null = null;
 
   constructor(private readonly hooks: InterceptorHooks) {}
 
@@ -134,6 +155,16 @@ export class GrokStreamInterceptor {
   /** Commands Grok advertises for the attached session, or null before its first list. */
   get advertisedCommands(): readonly GrokCommand[] | null {
     return this.commands;
+  }
+
+  /** Counts attachments, so a follower notices that the attached session changed. */
+  get attachment(): number {
+    return this.attachments;
+  }
+
+  /** Whether Grok is still replaying the attached session's history. */
+  get replaying(): boolean {
+    return this.loading;
   }
 
   /** The turn another client is running in this session, if any. */
@@ -205,13 +236,102 @@ export class GrokStreamInterceptor {
       return [message];
     }
     if (text(params["sessionId"]) !== this.native || !this.native) return [message];
+    this.remember(updateKey(params));
     const replay = this.loading || record(params["_meta"])["isReplay"] === true;
     if (method === "session/update") return [this.sessionUpdate(message, params, replay)];
     if (!replay) this.vendor(method, params);
     return [message];
   }
 
+  /**
+   * An entry of the attached session's log, which every Grok process writing the session
+   * appends to. Entries this client already received live are skipped. The rest were written
+   * by another Grok process, such as a terminal started without `--leader`, and are delivered
+   * as if streamed, with their turns reported like terminal turns. Returns the messages for
+   * Paseo.
+   */
+  followed(message: JsonRpcMessage): JsonRpcMessage[] {
+    const method = text(message["method"]);
+    const params = record(message["params"]);
+    const native = this.native;
+    if (!method || !native || this.loading || text(params["sessionId"]) !== native) return [];
+    const key = updateKey(params);
+    if (!key) return [];
+    const seen = this.seen.has(key);
+    const starts = this.startsLoggedTurn(message);
+    this.remember(key);
+    if (method !== "session/update") {
+      // Grok does not stream every vendor update live; only a followed turn's end matters.
+      if (!seen && this.loggedTurn && this.foreign?.turnId === this.loggedTurn)
+        this.vendor(method, params);
+      return [];
+    }
+    const update = record(params["update"]);
+    if (update["sessionUpdate"] === "user_message_chunk") {
+      // Grok does not stream a prompt's user message to the other clients, so whether
+      // the turn was missed shows only with its first reply.
+      const eventId = text(record(params["_meta"])["eventId"]) ?? key;
+      this.loggedUser = seen
+        ? null
+        : { id: `grok-user-log:${eventId}`, text: normalize(promptText([update["content"]])) };
+      return [];
+    }
+    if (seen) {
+      this.loggedUser = null;
+      return [];
+    }
+    this.noticeLog(native);
+    if (starts) {
+      const promptId = text(record(params["_meta"])["promptId"]) ?? key;
+      this.endForeign("completed");
+      const turnId = `grok-turn:${promptId}`;
+      this.foreign = { promptId, turnId };
+      this.loggedTurn = turnId;
+      const userMessage = this.loggedUser?.text ? this.loggedUser : undefined;
+      this.loggedUser = null;
+      this.hooks.signal({
+        type: "turn.started",
+        nativeSessionId: native,
+        turnId,
+        ...(userMessage ? { userMessage } : {}),
+      });
+    }
+    return [this.sessionUpdate(message, params, false)];
+  }
+
+  /** Whether {@link followed} starts a new turn for this log entry. */
+  startsLoggedTurn(message: JsonRpcMessage): boolean {
+    if (text(message["method"]) !== "session/update") return false;
+    const params = record(message["params"]);
+    const key = updateKey(params);
+    if (!key || this.seen.has(key)) return false;
+    if (record(params["update"])["sessionUpdate"] === "user_message_chunk") return false;
+    if (this.loggedUser || !this.loggedTurn || this.foreign?.turnId !== this.loggedTurn)
+      return true;
+    const promptId = text(record(params["_meta"])["promptId"]);
+    return !!promptId && this.foreign.promptId !== promptId;
+  }
+
+  private noticeLog(native: string): void {
+    if (this.warnedLog) return;
+    this.warnedLog = true;
+    const title =
+      "Another Grok process is writing this session outside Grok's leader; Paseo follows it from the session log. Start the terminal with `grok --leader` to share the session live; messages sent from Paseo meanwhile run in a separate Grok process.";
+    this.hooks.warn?.(`Session ${native}: ${title}`);
+    this.hooks.signal({ type: "notice", nativeSessionId: native, id: `grok-log:${native}`, title });
+  }
+
+  private remember(key: string | undefined): void {
+    if (!key) return;
+    this.seen.add(key);
+    if (this.seen.size > SEEN_LIMIT) {
+      const oldest = this.seen.values().next().value;
+      if (oldest !== undefined) this.seen.delete(oldest);
+    }
+  }
+
   private attach(sessionId: string | null): void {
+    this.attachments++;
     if (sessionId !== this.native) {
       this.options = [];
       this.commands = null;
@@ -222,6 +342,8 @@ export class GrokStreamInterceptor {
     this.segment = 0;
     this.lastChunk = null;
     this.claimedPromptIds.clear();
+    this.loggedTurn = null;
+    this.loggedUser = null;
   }
 
   private response(message: JsonRpcMessage): JsonRpcMessage {
