@@ -45,9 +45,10 @@ The test asserts, in order:
 5. A later Paseo message reaches the terminal, with neither side closed.
 6. Discovery does not import the Paseo-created session a second time.
 
-`tests/grok-follow-live.test.ts` uses a model that streams reasoning before each reply and asserts that every turn reaches the Paseo timeline as user message, reasoning and reply, in order:
+`tests/grok-follow-live.test.ts` runs twice, with Grok's default config and with `[features] shared_daemon = true`. It uses a model that streams reasoning before each reply and asserts that every turn reaches the Paseo timeline as user message, reasoning and reply, in order:
 1. A first terminal prompt, a Paseo message and a later terminal prompt, all through the leader.
-2. Two more prompts from a second `grok agent stdio` process without `--leader` that loads the same session, as a plain `grok` window does. The leader never streams these; Paseo follows them from the session log, with a single warning notice.
+2. Two more prompts from a second `grok agent stdio` process without `--leader` that loads the same session, as a plain `grok` window does; with `shared_daemon` it also sets `GROK_SHARED_DAEMON=1` and has an environment of its own. Grok shares the daemon only for hosted models and matching environments, so this window runs on its own; the leader never streams its turns, and Paseo follows them from the session log, with at most one warning notice.
+3. `/bridge` reports the leader socket, the `shared_daemon` setting and the entries followed from the session log.
 
 The tests are skipped when no `grok` executable is found. `pnpm package:smoke` runs them again against the packed plugin.
 
@@ -61,6 +62,7 @@ Run with a real `grok --leader` TUI in tmux, the same fake-model Grok home and s
 - `paseo run --provider grok-terminal` creates a new session on the leader, which discovery does not import a second time.
 - After `paseo daemon stop`, the TUI keeps working in the session.
 - Under 0.17.0 the plugin logs the tentative-host warning and works the same.
+- With `[features] shared_daemon = true` and a plain `grok` TUI (0.17.1 daemon), later prompts with reasoning and replies appear in `paseo logs`, and `/bridge` lists the setting, the session log with its followed entries and the TUI window.
 - Slash commands through `paseo send` (0.16.2 and 0.17.0 daemons): `/help`, `/btw` (also with `--behavior steer` during a TUI turn, which keeps running), `/model`, `/rename` (the TUI shows the title), `/plan`, `/recap`, `/fork`, `/new` and a rejected `/theme`; the TUI shows model, title and mode changes.
 
 ## Unit tests
@@ -72,7 +74,8 @@ Run with a real `grok --leader` TUI in tmux, the same fake-model Grok home and s
 | Provider wrapper         | `tests/provider.test.ts`                                                     | Native settings kept on attach, synthetic turns and user messages, failure on detach, turn already running at attach, title routing, back-to-back turns, steering capability, command list, local command turns, aliases, steered side commands, `/plan` with a task |
 | Slash commands           | `tests/commands.test.ts`, `tests/command-runner.test.ts`                     | Parsing, routing precedence, rejection and help texts, Grok's command reference, model resolution; each bridge command against a fake Grok stream or CLI, usage formatting, and failures as replies                                                                  |
 | Models                   | `tests/models.test.ts`                                                       | Tolerant model-state parsing, synthesized config options, catalog enrichment                                                                                                                                                                                         |
-| Session log              | `tests/session-log.test.ts`                                                  | Update keys, skipping entries that arrived live, missed turns with their prompts, the one-time notice, log path, start at the log's end, grace period, torn lines, one turn per poll                                                                                 |
+| Session log              | `tests/session-log.test.ts`                                                  | Update keys, skipping entries that arrived live, missed turns with their prompts, the one-time notice, log path, start at the log's end, grace period, torn lines, one turn per poll, warning for a missing log                                                      |
+| Diagnostics              | `tests/diagnostics.test.ts`                                                  | `/bridge`: TOML settings, leader socket of a launch, sockets, environment without values of other variables, session log, open Grok windows, missing log                                                                                                             |
 | Discovery                | `tests/discovery.test.ts`, `tests/session-workspace.test.ts`                 | Handle matching, import and reload, archived workspaces, isolated failures, lookback, polling with backoff, stable workspace IDs and titles                                                                                                                          |
 | Titles, launch, versions | `tests/title-sync.test.ts`, `tests/launch.test.ts`, `tests/versions.test.ts` | Debounced titles, launch arguments and status diagnostics, version policy                                                                                                                                                                                            |
 
@@ -99,7 +102,7 @@ For a new **Paseo** release:
 
 ## Not covered
 
-- Hosted Grok models with a real Grok account, and the `[features] shared_daemon = true` route, which Grok applies only to windows signed in with a Grok account.
+- Hosted Grok models with a real Grok account, and with them Grok's shared background service (the daemon route, `$GROK_HOME/leader.sock.daemon`) that `[features] shared_daemon = true` and `--leader` share between windows. Local models always run on their own; `/bridge` shows which applies on a real machine.
 - Tool permission requests across clients.
 - macOS and Windows.
 - The Paseo mobile and desktop apps; the checks use the Paseo client API and CLI.

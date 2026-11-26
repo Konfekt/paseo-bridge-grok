@@ -48,14 +48,16 @@ Grok Build can run one shared background process per Grok home, the _leader_ (`$
    grok --leader
    ```
 
-   or make it the default for Grok windows signed in with a Grok account, in `~/.grok/config.toml`:
+   or make it the default in `~/.grok/config.toml` (or with `GROK_SHARED_DAEMON=1`), which is equivalent to `--leader` in every window:
 
    ```toml
    [features]
    shared_daemon = true
    ```
 
-   A window that does not run on the leader still works on its own and its sessions are still imported, but Paseo and that window then each run their own copy of the session; see [Troubleshooting](#troubleshooting).
+   Grok applies `shared_daemon` with caveats: it only affects windows whose model turns go to Grok's hosted backend (signed in with a Grok account), not windows on `XAI_API_KEY` or a custom model; `[cli] use_leader = false` overrides it, and `--no-leader` keeps one window out. A window shares the leader's daemon only when started with the same model route, starting model, `GROK_CONFIG_PATH` file and environment as the leader, and otherwise silently runs its own. The leader may be started by the bridge, with the Paseo daemon's environment, so start the Paseo daemon from the same shell environment as your terminals, or start a terminal before Paseo opens the session.
+
+   A window that does not run on the leader still works on its own and its sessions are still imported. Paseo follows its turns from Grok's session log, but messages from Paseo run in a copy of the session that the window does not see; see [Troubleshooting](#troubleshooting).
 
 To install from a local checkout instead:
 
@@ -136,40 +138,42 @@ Grok, its home and the Paseo daemon must be on the same machine. For a remote ma
 
 Paseo's command menu lists Grok's own commands and the bridge's. Type `/help` in Paseo for the list that applies to the session.
 
-| Command                          | Handled by | What it does                                                                                                                      |
-| -------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Commands Grok advertises         | Grok       | Run natively, for example `/compact`, `/context`, `/session-info`, `/always-approve`, `/goal`, `/loop`.                           |
-| `/status`, `/info`               | Grok       | Run as `/session-info`.                                                                                                           |
-| `/btw <question>`                | Bridge     | Asks Grok a side question with the session as context. The answer shows in Paseo and stays out of the conversation.               |
-| `/model [model] [effort]` (`/m`) | Bridge     | Lists the session's models, or switches model (ID or name) and optionally reasoning effort. The terminal follows.                 |
-| `/effort [level]`                | Bridge     | Shows or sets the reasoning effort of the current model.                                                                          |
-| `/rename <title>`                | Bridge     | Renames the Grok session; the terminal, the agent and its workspace take the title.                                               |
-| `/recap`                         | Bridge     | Grok's one-sentence summary of the session.                                                                                       |
-| `/plan [task]`, `/plan off`      | Bridge     | Switches the session to Grok's plan mode, and runs the task there if one is given; `/plan off` leaves it.                         |
-| `/fork [title]`                  | Bridge     | Copies the session into a new Grok session, which Paseo lists as a new agent.                                                     |
-| `/new <prompt>` (`/clear`)       | Bridge     | Starts a new Grok session in the same folder with the prompt; Paseo lists it as a new agent.                                      |
-| `/usage [turn]` (`/cost`)        | Bridge     | Shows the session's token usage in total and per turn, from `grok usage <session>`. No model call.                                |
-| `/export [file]`                 | Bridge     | Writes the transcript as Markdown to a new file, by default `grok-session-<ID>.md` in the session's folder (`grok export`).       |
-| `/help`                          | Bridge     | Lists the commands available in Paseo.                                                                                            |
-| Other Grok commands              | Rejected   | Answered in Paseo with a note that the command only works in the Grok terminal, and what to use instead. Nothing is sent to Grok. |
+| Command                          | Handled by | What it does                                                                                                                                                                                          |
+| -------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Commands Grok advertises         | Grok       | Run natively, for example `/compact`, `/context`, `/session-info`, `/always-approve`, `/goal`, `/loop`.                                                                                               |
+| `/status`, `/info`               | Grok       | Run as `/session-info`.                                                                                                                                                                               |
+| `/btw <question>`                | Bridge     | Asks Grok a side question with the session as context. The answer shows in Paseo and stays out of the conversation.                                                                                   |
+| `/model [model] [effort]` (`/m`) | Bridge     | Lists the session's models, or switches model (ID or name) and optionally reasoning effort. The terminal follows.                                                                                     |
+| `/effort [level]`                | Bridge     | Shows or sets the reasoning effort of the current model.                                                                                                                                              |
+| `/rename <title>`                | Bridge     | Renames the Grok session; the terminal, the agent and its workspace take the title.                                                                                                                   |
+| `/recap`                         | Bridge     | Grok's one-sentence summary of the session.                                                                                                                                                           |
+| `/plan [task]`, `/plan off`      | Bridge     | Switches the session to Grok's plan mode, and runs the task there if one is given; `/plan off` leaves it.                                                                                             |
+| `/fork [title]`                  | Bridge     | Copies the session into a new Grok session, which Paseo lists as a new agent.                                                                                                                         |
+| `/new <prompt>` (`/clear`)       | Bridge     | Starts a new Grok session in the same folder with the prompt; Paseo lists it as a new agent.                                                                                                          |
+| `/usage [turn]` (`/cost`)        | Bridge     | Shows the session's token usage in total and per turn, from `grok usage <session>`. No model call.                                                                                                    |
+| `/export [file]`                 | Bridge     | Writes the transcript as Markdown to a new file, by default `grok-session-<ID>.md` in the session's folder (`grok export`).                                                                           |
+| `/bridge`                        | Bridge     | Shows how the bridge reaches the session: Grok home, leader and shared daemon sockets, leader settings, its environment, the session log it follows, and the Grok windows that have the session open. |
+| `/help`                          | Bridge     | Lists the commands available in Paseo.                                                                                                                                                                |
+| Other Grok commands              | Rejected   | Answered in Paseo with a note that the command only works in the Grok terminal, and what to use instead. Nothing is sent to Grok.                                                                     |
 
 Grok's own commands always take precedence: a command Grok starts offering to Paseo in a later release runs natively, even if the bridge has one of the same name. Commands Grok only offers in its terminal are recognised from a built-in list and from the command reference Grok installs (`$GROK_HOME/docs/user-guide`), so terminal commands added later are rejected clearly as well. Text such as `/usr/bin/env is missing` is sent as a normal message.
 
 Limits of the bridge commands:
 - `/new` and `/fork` cannot move the current agent to another session; Paseo shows the new session as a separate agent within a few seconds. `/new` needs a prompt because Grok lists a session only once it has a message; Paseo's new-agent button starts an empty one.
 - `/rename --auto`, `/remember`, `/resume`, `/copy` and the other terminal commands are rejected; `/resume` explains how to continue the session in a terminal, `/copy` points to Paseo's copy action. `/export` refuses a file name that is taken, as Grok does. `/usage` without a session ID (the plan's limit) remains a terminal command (`grok usage`).
-- While a turn runs, Paseo interrupts it before sending, unless **Settings → Default send** is **Steer** (or `paseo send --behavior steer`). With steering, `/btw`, `/recap`, `/rename`, `/fork`, `/new`, `/usage`, `/export`, `/help` and rejected commands are answered beside the running turn; commands that change the session (`/model`, `/effort`, `/plan`) are not, so Paseo interrupts the turn as usual.
+- While a turn runs, Paseo interrupts it before sending, unless **Settings → Default send** is **Steer** (or `paseo send --behavior steer`). With steering, `/btw`, `/recap`, `/rename`, `/fork`, `/new`, `/usage`, `/export`, `/bridge`, `/help` and rejected commands are answered beside the running turn; commands that change the session (`/model`, `/effort`, `/plan`) are not, so Paseo interrupts the turn as usual.
 
 ## Troubleshooting
 
 - **Grok Terminal is `unavailable`.** `paseo provider ls` shows the reason. _Executable not found_: install Grok Build or set `command` as above. _Grok Build 1.0.60 or newer is required_: run `grok update`.
 - **Nothing is imported.** Send a first prompt: Grok does not list a session before it has a message. Check `paseo plugin ls` (status `running`), that `pluginsEnabled` is `true`, and `paseo plugin logs paseo-bridge-grok`. The session must be in the Grok home that Paseo uses (`GROK_HOME`, default `~/.grok`) and active within the lookback window.
 - **Paseo warns that another Grok process writes the session.** The terminal is not on the leader. Paseo then follows that terminal's turns (reasoning, replies and tool calls) from Grok's session log with about two seconds of delay, but messages sent from Paseo run in a separate Grok process that the terminal does not see. Close the terminal and resume the session with `grok --leader` (or `grok --leader -r <session>`) to share it live in both directions.
-- **`shared_daemon = true` does not share.** Grok uses the shared daemon only for windows signed in with a Grok account; windows using an API key or a custom model keep their own process. Use `grok --leader` instead.
+- **`shared_daemon = true` does not share.** Grok applies it only to windows signed in with a Grok account, and a window joins the leader's daemon only with the same model route, starting model, `GROK_CONFIG_PATH` and environment as the leader. Type `/bridge` in Paseo and compare: the leader socket and Grok home must match the terminal's, the listed Grok window should be your terminal, and a growing count of followed entries means the window runs on its own. Restart the terminal from the Paseo daemon's environment, or run `grok leader kill` and start the terminal first so the leader takes its environment.
+- **Paseo shows only the first prompt of a session.** Type `/bridge` in Paseo. A missing session log means Grok keeps that session where the bridge cannot follow it; otherwise update the plugin, and reopen the agent so the new provider code loads.
 - **The leader refuses to start under a sandbox profile.** Run Grok without the sandbox, or accept separate sessions.
 - **Grok asks to sign in from Paseo.** Paseo creates new sessions as the daemon's user with the provider environment; sign in with `grok login` as that user and the same `GROK_HOME`.
 - **A version warning in the plugin log.** A Paseo or Grok release newer than the verified range is in use. The bridge keeps working; report problems and pin a verified release if attached sessions misbehave.
-- **Diagnostics.** `paseo plugin logs paseo-bridge-grok`, `$PASEO_HOME/daemon.log`, and Grok's own `grok leader list`.
+- **Diagnostics.** `/bridge` in Paseo, `paseo plugin logs paseo-bridge-grok`, `$PASEO_HOME/daemon.log`, and Grok's own `grok leader list`.
 
 ## Limits
 

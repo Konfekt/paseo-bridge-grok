@@ -43,12 +43,18 @@ export class SessionLogFollower {
   private busy = false;
   private readonly timer: NodeJS.Timeout;
   private start: Promise<void> = Promise.resolve();
+  private followedCount = 0;
 
   constructor(
     private readonly home: string,
     private readonly interceptor: GrokStreamInterceptor,
     private readonly deliver: (message: JsonRpcMessage) => void,
-    private readonly options: { pollMs?: number; graceMs?: number; now?: () => number } = {},
+    private readonly options: {
+      pollMs?: number;
+      graceMs?: number;
+      now?: () => number;
+      warn?: (message: string) => void;
+    } = {},
   ) {
     this.timer = setInterval(() => void this.poll(), options.pollMs ?? LOG_POLL_MS);
     this.timer.unref();
@@ -64,13 +70,31 @@ export class SessionLogFollower {
     this.path = native && cwd ? sessionLogPath(this.home, cwd, native) : null;
     this.remainder = "";
     this.pending = [];
+    this.followedCount = 0;
     this.offset = Number.POSITIVE_INFINITY;
     const path = this.path;
+    // A loaded session has a log; a missing one means Grok keeps the session elsewhere.
+    const loaded = this.interceptor.replaying;
     this.start = path
-      ? fileSize(path).then((size) => {
-          if (this.path === path) this.offset = size;
-        })
+      ? stat(path).then(
+          (info) => {
+            if (this.path === path) this.offset = info.size;
+          },
+          () => {
+            if (this.path !== path) return;
+            this.offset = 0;
+            if (loaded)
+              this.options.warn?.(
+                `Grok session log ${path} not found; turns of Grok windows outside the bridge's leader cannot be followed`,
+              );
+          },
+        )
       : Promise.resolve();
+  }
+
+  /** The log followed for the current attachment, and how many entries reached Paseo from it. */
+  get status(): { path: string | null; followed: number } {
+    return { path: this.path, followed: this.followedCount };
   }
 
   stop(): void {
@@ -139,7 +163,9 @@ export class SessionLogFollower {
       // the ACP stream, so the next turn waits until the previous replies have arrived.
       if (delivered && this.interceptor.startsLoggedTurn(entry.message)) break;
       this.pending.shift();
-      for (const message of this.interceptor.followed(entry.message)) {
+      const messages = this.interceptor.followed(entry.message);
+      if (messages.length) this.followedCount++;
+      for (const message of messages) {
         this.deliver(message);
         delivered = true;
       }

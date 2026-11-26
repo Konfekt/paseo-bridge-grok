@@ -28,15 +28,16 @@ export type HostClient = ReturnType<typeof createHostClient>;
 export async function startLive(
   grok: string,
   firstPrompt: string,
-  options: { reasoning?: boolean } = {},
+  options: { reasoning?: boolean; sharedDaemon?: boolean } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "pbg-live-"));
   const grokHome = join(root, "grok");
   const paseoHome = join(root, "paseo");
   const project = join(root, "project");
   await Promise.all([mkdir(grokHome), mkdir(paseoHome), mkdir(project)]);
-  const model = await startModelServer({ slowMs: 2_500, ...options });
-  await writeFile(join(grokHome, "config.toml"), grokConfig(model.url));
+  const model = await startModelServer({ slowMs: 2_500, reasoning: options.reasoning ?? false });
+  const features = options.sharedDaemon ? "\n[features]\nshared_daemon = true\n" : "";
+  await writeFile(join(grokHome, "config.toml"), grokConfig(model.url) + features);
   const grokEnv = {
     ...process.env,
     GROK_HOME: grokHome,
