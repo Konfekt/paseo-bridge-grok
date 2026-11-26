@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { AcpStream, AcpStreamMessage } from "@getpaseo/plugin/server/acp";
+import type { FollowStatus } from "./diagnostics.js";
 import {
   GrokStreamInterceptor,
   type InterceptorHooks,
@@ -14,6 +15,10 @@ const TERMINATE_GRACE_MS = 2_000;
 
 export interface GrokStream extends AcpStream {
   interceptor: GrokStreamInterceptor;
+  /** The command and environment Grok was started with. */
+  launch: GrokLaunch;
+  /** The session log followed for the attached session; see {@link SessionLogFollower}. */
+  followStatus(): FollowStatus;
   /** Send a request of the bridge's own to Grok; its answer does not reach Paseo. */
   request(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<unknown>;
   /** Observe every notification from Grok, including those Paseo does not receive. */
@@ -91,7 +96,9 @@ export async function spawnGrokStream(
   const deliver = (message: JsonRpcMessage) => {
     if (readableOpen) readable.enqueue(message as AcpStreamMessage);
   };
-  const follower = new SessionLogFollower(grokHome(launch.env), interceptor, deliver);
+  const follower = new SessionLogFollower(grokHome(launch.env), interceptor, deliver, {
+    ...(hooks.warn ? { warn: hooks.warn } : {}),
+  });
   const pendingRequests = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
@@ -154,6 +161,8 @@ export async function spawnGrokStream(
   });
   return {
     interceptor,
+    launch,
+    followStatus: () => follower.status,
     request(method, params, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
       if (ending || !child.stdin.writable)
         return Promise.reject(new Error("Grok Build stdin is closed"));

@@ -120,6 +120,36 @@ describe("SessionLogFollower", () => {
     );
   });
 
+  test("warns once when a loaded session has no log", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pbg-log-"));
+    dirs.push(home);
+    const warnings: string[] = [];
+    const interceptor = new GrokStreamInterceptor({ signal: () => undefined });
+    interceptor.outbound(rpc({ id: 0, method: "initialize", params: {} }));
+    interceptor.inbound(rpc({ id: 0, result: { _meta: { agentVersion: "1.0.92" } } }));
+    interceptor.outbound(
+      rpc({
+        id: 1,
+        method: "session/load",
+        params: { sessionId: "s1", cwd: "/p", mcpServers: [] },
+      }),
+    );
+    const follower = new SessionLogFollower(home, interceptor, () => undefined, {
+      pollMs: 60_000,
+      warn: (message) => warnings.push(message),
+    });
+    try {
+      follower.sync();
+      await follower.poll();
+      await follower.poll();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("not found");
+      expect(follower.status).toEqual({ path: sessionLogPath(home, "/p", "s1"), followed: 0 });
+    } finally {
+      follower.stop();
+    }
+  });
+
   test("delivers only entries appended after attaching, after their grace, one turn per poll", async () => {
     const home = mkdtempSync(join(tmpdir(), "pbg-log-"));
     dirs.push(home);
@@ -165,6 +195,7 @@ describe("SessionLogFollower", () => {
         "turn.ended",
         "turn.started",
       ]);
+      expect(follower.status.followed).toBe(2);
     } finally {
       follower.stop();
     }

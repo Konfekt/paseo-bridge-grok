@@ -4,12 +4,18 @@ import { findGrok, startLive } from "./fixtures/live.js";
 
 const grok = findGrok();
 
-test.skipIf(!grok)(
-  "every turn reaches Paseo, also from a terminal that is not on Grok's leader",
+// `[features] shared_daemon = true` lets terminals share the leader without `--leader`, but a
+// window whose model turns don't go to Grok's hosted backend (as with these local models), or
+// whose environment differs from the leader's, still runs on its own: Paseo must follow it.
+test.skipIf(!grok).each([
+  { setup: "default config", sharedDaemon: false },
+  { setup: "features.shared_daemon", sharedDaemon: true },
+])(
+  "every turn reaches Paseo, also from a terminal that is not on Grok's leader ($setup)",
   { timeout: 240_000 },
-  async () => {
+  async ({ sharedDaemon }) => {
     if (!grok) return;
-    const live = await startLive(grok, "first terminal prompt", { reasoning: true });
+    const live = await startLive(grok, "first terminal prompt", { reasoning: true, sharedDaemon });
     const { client, terminal, sessionId, grokEnv, project } = live;
     let outsider: AcpClient | undefined;
     try {
@@ -47,7 +53,11 @@ test.skipIf(!grok)(
 
       // A terminal started without `--leader` writes the session from its own process; the
       // leader never streams its turns, so Paseo follows them from the session log.
-      outsider = new AcpClient(grok, ["agent", "stdio"], grokEnv, project);
+      // With shared_daemon, the window asks to share but runs in an environment of its own.
+      const outsiderEnv = sharedDaemon
+        ? { ...grokEnv, GROK_SHARED_DAEMON: "1", SHELL_ONLY_SETTING: "1" }
+        : grokEnv;
+      outsider = new AcpClient(grok, ["agent", "stdio"], outsiderEnv, project);
       await outsider.initialize();
       await outsider.call("session/load", { sessionId, cwd: project, mcpServers: [] });
       for (const prompt of ["fourth outside the leader", "fifth outside the leader"])
@@ -55,16 +65,29 @@ test.skipIf(!grok)(
           sessionId,
           prompt: [{ type: "text", text: prompt }],
         });
-      await expect.poll(items, { timeout: 30_000 }).toEqual([
-        ...turn("first terminal prompt"),
-        ...turn("second from paseo"),
-        ...turn("third from the terminal"),
-        // Once, telling the user to share the session through `grok --leader`.
-        "notification: ",
-        ...turn("fourth outside the leader"),
-        ...turn("fifth outside the leader"),
-      ]);
+      const turns = async () => (await items()).filter((item) => item !== "notification: ");
+      await expect
+        .poll(turns, { timeout: 30_000 })
+        .toEqual([
+          ...turn("first terminal prompt"),
+          ...turn("second from paseo"),
+          ...turn("third from the terminal"),
+          ...turn("fourth outside the leader"),
+          ...turn("fifth outside the leader"),
+        ]);
+      // At most once, telling the user to share the session through `grok --leader`.
+      expect((await items()).filter((item) => item === "notification: ").length).toBeLessThan(2);
       await idle();
+
+      // `/bridge` shows what to compare with the terminal's setup.
+      await client.sendMessage(agentId, "/bridge");
+      await expect
+        .poll(() => live.timeline(agentId), { timeout: 30_000 })
+        .toContain("Session log:");
+      const report = await live.timeline(agentId);
+      expect(report).toContain(`features.shared_daemon = ${sharedDaemon ? "true" : "unset"}`);
+      expect(report).toContain("Leader socket:");
+      expect(report).toMatch(/[1-9]\d* entries followed from it/);
     } finally {
       outsider?.close();
       await live.stop();

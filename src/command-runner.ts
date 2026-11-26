@@ -7,6 +7,7 @@ import {
   resolveModelArgs,
   usageText,
 } from "./commands.js";
+import { bridgeReport } from "./diagnostics.js";
 import { errorMessage } from "./errors.js";
 import type { GrokCli } from "./launch.js";
 import type { GrokStream } from "./stream.js";
@@ -95,6 +96,15 @@ export class CommandRunner {
         return this.usage(args);
       case "export":
         return this.exportTranscript(args);
+      case "bridge":
+        return reply(
+          await bridgeReport({
+            launch: this.stream.launch,
+            sessionId: this.sessionId,
+            cwd: this.stream.interceptor.cwd,
+            follow: this.stream.followStatus(),
+          }),
+        );
       default:
         return reply(`/${command.name} is not implemented.`, true);
     }

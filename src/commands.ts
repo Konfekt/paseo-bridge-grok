@@ -103,6 +103,13 @@ export const BRIDGE_COMMANDS: readonly BridgeCommand[] = [
     aside: true,
   },
   {
+    name: "bridge",
+    aliases: [],
+    description:
+      "Show how the bridge reaches this session: Grok home, leader and daemon sockets, session log, open Grok windows",
+    aside: true,
+  },
+  {
     name: "help",
     aliases: [],
     description: "List the commands available here",
