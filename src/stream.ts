@@ -7,6 +7,7 @@ import {
   type JsonRpcMessage,
 } from "./interceptor.js";
 import type { GrokLaunch } from "./launch.js";
+import { grokHome, SessionLogFollower } from "./session-log.js";
 
 const STDERR_TAIL_BYTES = 4_096;
 const TERMINATE_GRACE_MS = 2_000;
@@ -90,6 +91,7 @@ export async function spawnGrokStream(
   const deliver = (message: JsonRpcMessage) => {
     if (readableOpen) readable.enqueue(message as AcpStreamMessage);
   };
+  const follower = new SessionLogFollower(grokHome(launch.env), interceptor, deliver);
   const pendingRequests = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
@@ -134,8 +136,10 @@ export async function spawnGrokStream(
       if (typeof params?.sessionId === "string" && hidden.has(params.sessionId)) return;
     }
     for (const rewritten of interceptor.inbound(message as JsonRpcMessage)) deliver(rewritten);
+    follower.sync();
   });
   child.once("close", (code, signal) => {
+    follower.stop();
     onExit();
     failPending(new Error(`Grok Build exited (${signal ?? code ?? "unknown"})`));
     if (!readableOpen) return;
@@ -183,6 +187,7 @@ export async function spawnGrokStream(
     writable: new WritableStream<AcpStreamMessage>({
       write(message) {
         const { forward, replies } = interceptor.outbound(message as JsonRpcMessage);
+        follower.sync();
         if (forward) {
           if (ending || !child.stdin.writable) throw new Error("Grok Build stdin is closed");
           child.stdin.write(`${JSON.stringify(forward)}\n`);

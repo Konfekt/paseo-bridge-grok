@@ -45,6 +45,10 @@ The test asserts, in order:
 5. A later Paseo message reaches the terminal, with neither side closed.
 6. Discovery does not import the Paseo-created session a second time.
 
+`tests/grok-follow-live.test.ts` uses a model that streams reasoning before each reply and asserts that every turn reaches the Paseo timeline as user message, reasoning and reply, in order:
+1. A first terminal prompt, a Paseo message and a later terminal prompt, all through the leader.
+2. Two more prompts from a second `grok agent stdio` process without `--leader` that loads the same session, as a plain `grok` window does. The leader never streams these; Paseo follows them from the session log, with a single warning notice.
+
 The tests are skipped when no `grok` executable is found. `pnpm package:smoke` runs them again against the packed plugin.
 
 ## Manual end-to-end check
@@ -68,6 +72,7 @@ Run with a real `grok --leader` TUI in tmux, the same fake-model Grok home and s
 | Provider wrapper         | `tests/provider.test.ts`                                                     | Native settings kept on attach, synthetic turns and user messages, failure on detach, turn already running at attach, title routing, back-to-back turns, steering capability, command list, local command turns, aliases, steered side commands, `/plan` with a task |
 | Slash commands           | `tests/commands.test.ts`, `tests/command-runner.test.ts`                     | Parsing, routing precedence, rejection and help texts, Grok's command reference, model resolution; each bridge command against a fake Grok stream or CLI, usage formatting, and failures as replies                                                                  |
 | Models                   | `tests/models.test.ts`                                                       | Tolerant model-state parsing, synthesized config options, catalog enrichment                                                                                                                                                                                         |
+| Session log              | `tests/session-log.test.ts`                                                  | Update keys, skipping entries that arrived live, missed turns with their prompts, the one-time notice, log path, start at the log's end, grace period, torn lines, one turn per poll                                                                                 |
 | Discovery                | `tests/discovery.test.ts`, `tests/session-workspace.test.ts`                 | Handle matching, import and reload, archived workspaces, isolated failures, lookback, polling with backoff, stable workspace IDs and titles                                                                                                                          |
 | Titles, launch, versions | `tests/title-sync.test.ts`, `tests/launch.test.ts`, `tests/versions.test.ts` | Debounced titles, launch arguments and status diagnostics, version policy                                                                                                                                                                                            |
 
@@ -83,6 +88,7 @@ What tends to break, and how it shows:
 - **`initialize._meta.modelState` reshaped**: Paseo's catalog falls back to Paseo's generic ACP behaviour; model lists may be empty or create a temporary Grok session.
 - **Leader flags or socket changes**: the provider fails to start; the plugin log shows Grok's stderr.
 - **`session/list` changes**: nothing is imported.
+- **Session log moved or reshaped** (`$GROK_HOME/sessions/<encoded cwd>/<session>/updates.jsonl`, entries keyed by `_meta.eventId` and `_meta.agentTimestampMs`): turns from a terminal without `--leader` stop appearing in Paseo after the import; leader turns are unaffected. A changed key format shows as duplicated messages.
 - **Extension methods renamed or reshaped** (`_x.ai/btw`, `_x.ai/recap` with its `session_recap` notification, `_x.ai/session/rename`, `_x.ai/session/fork`, `session/set_mode` IDs): that bridge command replies with Grok's error in Paseo (for example `/btw failed: Method not found`); everything else keeps working. If Grok starts advertising a command of the same name, Grok's version runs instead.
 - **New terminal commands**: rejected clearly once they appear in Grok's installed command reference; otherwise they reach Grok as text. Add them to `TERMINAL_COMMANDS` in `src/commands.ts`.
 

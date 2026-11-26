@@ -88,6 +88,7 @@ execFileSync(
     "tests/grok-live.test.ts",
     "tests/grok-commands-live.test.ts",
     "tests/grok-paseo-created-live.test.ts",
+    "tests/grok-follow-live.test.ts",
     "--reporter=verbose",
   ],
   {

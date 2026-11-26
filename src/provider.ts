@@ -262,6 +262,14 @@ export function wrapConnection(
       return;
     }
     if (!sessionId || !ready.has(sessionId)) return;
+    if (signal.type === "notice") {
+      emit({
+        type: "session.notice",
+        sessionId,
+        notice: { id: signal.id, severity: "warning", title: signal.title },
+      });
+      return;
+    }
     if (signal.type === "turn.started") {
       startTurn(sessionId, signal.turnId, signal.userMessage);
       return;
